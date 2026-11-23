@@ -35,7 +35,6 @@ jobs:
           SMS_BACKUP_DRIVE_FOLDER_ID: "1onk3qQvQdyj5iYvllFlAwIftZ_KCx06k"
         run: |
           python - <<'PY'
-          import io
           import json
           import os
           from pathlib import Path
@@ -64,7 +63,7 @@ jobs:
           )
 
           result = drive.files().list(
-              q=f"'{folder_id}' in parents and trashed = false and name contains '.xml'",
+              q=f"'{folder_id}' in parents and trashed = false and name contains 'sms-'",
               orderBy="modifiedTime desc",
               pageSize=1,
               fields="files(id,name,modifiedTime)",
@@ -73,13 +72,13 @@ jobs:
           files = result.get("files", [])
           if not files:
               raise RuntimeError(
-                  "No XML backup file was found in the configured Google Drive folder."
+                  "No SMS XML backup file was found in the configured Google Drive folder."
               )
 
           latest = files[0]
           safe_name = Path(latest["name"]).name
           if not safe_name.lower().endswith(".xml"):
-              raise RuntimeError("The newest Drive file is not an XML backup.")
+              raise RuntimeError("The newest matching Drive file is not an XML backup.")
 
           output_dir = Path("sms_backup")
           output_dir.mkdir(parents=True, exist_ok=True)
