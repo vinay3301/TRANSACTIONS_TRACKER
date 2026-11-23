@@ -62,29 +62,58 @@ jobs:
               cache_discovery=False,
           )
 
-          result = drive.files().list(
-              q=f"'{folder_id}' in parents and trashed = false and name contains 'sms-'",
-              orderBy="modifiedTime desc",
-              pageSize=1,
-              fields="files(id,name,modifiedTime)",
+          folder = drive.files().get(
+              fileId=folder_id,
+              fields="id,name,mimeType",
+              supportsAllDrives=True,
           ).execute()
 
-          files = result.get("files", [])
-          if not files:
+          if folder.get("mimeType") != "application/vnd.google-apps.folder":
               raise RuntimeError(
-                  "No SMS XML backup file was found in the configured Google Drive folder."
+                  "The configured Google Drive ID does not identify a folder."
               )
 
-          latest = files[0]
+          print(f"Drive folder access confirmed: {folder.get('name')}")
+
+          result = drive.files().list(
+              q=f"'{folder_id}' in parents and trashed = false",
+              orderBy="modifiedTime desc",
+              pageSize=100,
+              fields="files(id,name,mimeType,modifiedTime)",
+              supportsAllDrives=True,
+              includeItemsFromAllDrives=True,
+          ).execute()
+
+          visible_files = result.get("files", [])
+          print(f"Direct items visible to service account: {len(visible_files)}")
+          print(
+              "Visible item names: "
+              + ", ".join(item.get("name", "<unnamed>") for item in visible_files)
+          )
+
+          xml_files = [
+              item for item in visible_files
+              if item.get("name", "").lower().endswith(".xml")
+              and item.get("mimeType") != "application/vnd.google-apps.folder"
+          ]
+
+          if not xml_files:
+              raise RuntimeError(
+                  "The folder is accessible, but no direct .xml file is visible "
+                  "to the service account. Check the folder's sharing permissions."
+              )
+
+          latest = max(xml_files, key=lambda item: item.get("modifiedTime", ""))
           safe_name = Path(latest["name"]).name
-          if not safe_name.lower().endswith(".xml"):
-              raise RuntimeError("The newest matching Drive file is not an XML backup.")
 
           output_dir = Path("sms_backup")
           output_dir.mkdir(parents=True, exist_ok=True)
           output_path = output_dir / safe_name
 
-          request = drive.files().get_media(fileId=latest["id"])
+          request = drive.files().get_media(
+              fileId=latest["id"],
+              supportsAllDrives=True,
+          )
           with output_path.open("wb") as output:
               downloader = MediaIoBaseDownload(output, request)
               done = False
