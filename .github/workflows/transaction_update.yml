@@ -1,0 +1,108 @@
+name: Transaction Tracker Update
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: transaction-tracker-update
+  cancel-in-progress: false
+
+jobs:
+  update-transactions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download latest SMS XML from Google Drive
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SMS_BACKUP_DRIVE_FOLDER_ID: "1onk3qQvQdyj5iYvllFlAwIftZ_KCx06k"
+        run: |
+          python - <<'PY'
+          import io
+          import json
+          import os
+          from pathlib import Path
+
+          from google.oauth2.service_account import Credentials
+          from googleapiclient.discovery import build
+          from googleapiclient.http import MediaIoBaseDownload
+
+          raw_credentials = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+          if not raw_credentials:
+              raise RuntimeError(
+                  "Missing GitHub Actions secret: GOOGLE_SERVICE_ACCOUNT_JSON"
+              )
+
+          folder_id = os.environ["SMS_BACKUP_DRIVE_FOLDER_ID"]
+          credentials = Credentials.from_service_account_info(
+              json.loads(raw_credentials),
+              scopes=["https://www.googleapis.com/auth/drive.readonly"],
+          )
+
+          drive = build(
+              "drive",
+              "v3",
+              credentials=credentials,
+              cache_discovery=False,
+          )
+
+          result = drive.files().list(
+              q=f"'{folder_id}' in parents and trashed = false and name contains '.xml'",
+              orderBy="modifiedTime desc",
+              pageSize=1,
+              fields="files(id,name,modifiedTime)",
+          ).execute()
+
+          files = result.get("files", [])
+          if not files:
+              raise RuntimeError(
+                  "No XML backup file was found in the configured Google Drive folder."
+              )
+
+          latest = files[0]
+          safe_name = Path(latest["name"]).name
+          if not safe_name.lower().endswith(".xml"):
+              raise RuntimeError("The newest Drive file is not an XML backup.")
+
+          output_dir = Path("sms_backup")
+          output_dir.mkdir(parents=True, exist_ok=True)
+          output_path = output_dir / safe_name
+
+          request = drive.files().get_media(fileId=latest["id"])
+          with output_path.open("wb") as output:
+              downloader = MediaIoBaseDownload(output, request)
+              done = False
+              while not done:
+                  _, done = downloader.next_chunk()
+
+          if output_path.stat().st_size == 0:
+              raise RuntimeError("The downloaded XML backup is empty.")
+
+          print(
+              f"Downloaded latest SMS backup: {safe_name} "
+              f"({output_path.stat().st_size} bytes)"
+          )
+          PY
+
+      - name: Run transaction updater
+        env:
+          SMS_BACKUP_DIR: ${{ github.workspace }}/sms_backup
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python TranscationsUpdater
