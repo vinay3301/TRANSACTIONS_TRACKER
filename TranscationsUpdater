@@ -2,14 +2,17 @@
 import os
 import json
 import re
+import sys
 import shlex
 import xml.etree.ElementTree as ET
 import calendar
 import gspread
 import requests
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from oauth2client.service_account import ServiceAccountCredentials
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 # ============================================================
 # CONFIGURATION
@@ -225,6 +228,10 @@ def check_internet():
 
 def send_notify(title, content):
 
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print("\n" + str(title) + "\n" + str(content))
+        return
+
     command = (
         "termux-notification "
         f"-t {shlex.quote(str(title))} "
@@ -248,7 +255,7 @@ def log_sheet_error(sheet_name, error_details):
         ) as log:
 
             log.write(
-                f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                f"\n[{datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')}] "
                 f"Sheet/Stage: {sheet_name}\n"
                 f"{error_details}\n"
                 + "-" * 60
@@ -805,10 +812,10 @@ def process_purpose_tag_formatting(
 
 def calculate_expenses(merged_data):
 
-    today_str = datetime.now().strftime("%d/%m")
+    today_str = datetime.now(IST).strftime("%d/%m")
 
     yesterday_str = (
-        datetime.now()
+        datetime.now(IST)
         - timedelta(days=1)
     ).strftime("%d/%m")
 
@@ -869,7 +876,7 @@ def calculate_expenses(merged_data):
 
 def get_today_summary(merged_data):
 
-    today_str = datetime.now().strftime("%d/%m")
+    today_str = datetime.now(IST).strftime("%d/%m")
 
     today_rows = [
         row
@@ -1045,10 +1052,11 @@ def run_transaction_update():
                             "date",
                             "0"
                         )
-                    ) // 1000
+                    ) // 1000,
+                    IST
                 )
 
-                if dt < datetime(2026, 3, 1):
+                if dt < datetime(2026, 3, 1, tzinfo=IST):
                     continue
 
                 amount = extract_amount(body)
@@ -1165,10 +1173,10 @@ def run_transaction_update():
     balances = None
 
     current_month = get_month_sheet_name(
-        datetime.now()
+        datetime.now(IST)
     )
 
-    current_year = datetime.now().year
+    current_year = datetime.now(IST).year
 
     final_merged = []
 
@@ -1709,7 +1717,7 @@ def run_transaction_update():
             error_details = traceback.format_exc()
 
             print(
-                f"\n[{datetime.now()}] "
+                f"\n[{datetime.now(IST)}] "
                 f"ERROR PROCESSING ELIGIBLE SHEET: "
                 f"{sheet_name}"
             )
@@ -1858,7 +1866,7 @@ if __name__ == "__main__":
             else:
 
                 print(
-                    f"[{datetime.now()}]: "
+                    f"[{datetime.now(IST)}]: "
                     "Sync checked. "
                     "No current-month data or balances."
                 )
@@ -1866,17 +1874,20 @@ if __name__ == "__main__":
         else:
 
             print(
-                f"[{datetime.now()}]: "
+                f"[{datetime.now(IST)}]: "
                 "Device offline; "
                 "skipping spreadsheet operations."
             )
+
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                sys.exit(1)
 
     except Exception:
 
         error_details = traceback.format_exc()
 
         print(
-            f"\n[{datetime.now()}] "
+            f"\n[{datetime.now(IST)}] "
             "CRITICAL GLOBAL SCRIPT ERROR:"
         )
 
@@ -1886,4 +1897,6 @@ if __name__ == "__main__":
             "GLOBAL",
             error_details
         )
+
+        sys.exit(1)
 
