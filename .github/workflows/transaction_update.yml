@@ -139,7 +139,7 @@ jobs:
           SMS_BACKUP_DIR: ${{ github.workspace }}/sms_backup
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: python TranscationsUpdater.py
-- name: Send transaction email notification
+      - name: Send transaction email notification
         if: always()
         continue-on-error: true
         env:
