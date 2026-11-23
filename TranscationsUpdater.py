@@ -1180,6 +1180,10 @@ def run_transaction_update():
 
     final_merged = []
 
+    # Email reporting only: collect cleaned rows across eligible month sheets.
+    # This does not change transaction matching, deduplication, or sheet writes.
+    email_transactions = []
+
     for sheet_name in sorted(
         target_sheet_names,
         key=parse_sheet_date
@@ -1592,6 +1596,42 @@ def run_transaction_update():
                 key=sort_transaction
             )
 
+            # Reporting-only collection, using the actual year/month in each
+            # worksheet name so transactions sort correctly across years.
+            sheet_year, sheet_month = parse_sheet_date(sheet_name)
+
+            for report_row in final_unique:
+                try:
+                    day = int(report_row[0].split("/")[0])
+                    time_parts = [
+                        int(part)
+                        for part in format_time_str(report_row[1]).split(":")
+                    ]
+                    hour, minute = time_parts[0], time_parts[1]
+                    second = time_parts[2] if len(time_parts) > 2 else 0
+
+                    transaction_datetime = datetime(
+                        sheet_year,
+                        sheet_month,
+                        day,
+                        hour,
+                        minute,
+                        second
+                    )
+
+                    email_transactions.append((
+                        transaction_datetime,
+                        {
+                            "date": transaction_datetime.strftime("%d/%m/%Y"),
+                            "time": transaction_datetime.strftime("%H:%M:%S"),
+                            "amount": parse_num(report_row[3]),
+                            "description": report_row[4] or "Transaction",
+                            "bank": report_row[6] or ""
+                        }
+                    ))
+                except (ValueError, IndexError, TypeError):
+                    continue
+
             if sheet_name == current_month:
 
                 final_merged = final_unique
@@ -1730,6 +1770,48 @@ def run_transaction_update():
             )
 
             continue
+
+    # Export an email-only report for GitHub Actions. Termux execution and
+    # Android notification behavior remain unchanged.
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        email_transactions.sort(
+            key=lambda item: item[0],
+            reverse=True
+        )
+
+        today_expenses, _ = get_today_summary(final_merged)
+
+        email_report = {
+            "balances": balances or {
+                "hdfc": "N/A",
+                "bob": "N/A",
+                "cash": "N/A",
+                "total": "N/A"
+            },
+            "today_expense": today_expenses,
+            "transactions": [
+                transaction
+                for _, transaction in email_transactions[:10]
+            ]
+        }
+
+        report_path = os.path.join(
+            os.environ.get("GITHUB_WORKSPACE", os.getcwd()),
+            "transaction_email_report.json"
+        )
+
+        with open(report_path, "w", encoding="utf-8") as report_file:
+            json.dump(
+                email_report,
+                report_file,
+                ensure_ascii=False,
+                indent=2
+            )
+
+        print(
+            f"Email report prepared with "
+            f"{len(email_report['transactions'])} recent transactions."
+        )
 
     return (
         updated_entries,
