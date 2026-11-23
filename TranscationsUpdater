@@ -1,5 +1,6 @@
 
 import os
+import json
 import re
 import shlex
 import xml.etree.ElementTree as ET
@@ -14,9 +15,17 @@ from oauth2client.service_account import ServiceAccountCredentials
 # CONFIGURATION
 # ============================================================
 
-backup_dir = "/data/data/com.termux/files/home/Script_for_SMS/"
-json_file = "/data/data/com.termux/files/home/Script_for_SMS/fifth-composite-489705-v5-d06baf7f990f.json"
+backup_dir = os.environ.get(
+    "SMS_BACKUP_DIR",
+    "/data/data/com.termux/files/home/Script_for_SMS/"
+)
+json_file = os.environ.get(
+    "GOOGLE_SERVICE_ACCOUNT_FILE",
+    "/data/data/com.termux/files/home/Script_for_SMS/fifth-composite-489705-v5-d06baf7f990f.json"
+)
+service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 sheet_id = "1Gm3vbcktFlKPmHlNRePIVkvREQUJeXLaznjuX4c7iz8"
+os.makedirs(backup_dir, exist_ok=True)
 error_log_file = os.path.join(backup_dir, "sms_sync_errors.log")
 
 
@@ -922,13 +931,22 @@ def run_transaction_update():
         "https://www.googleapis.com/auth/drive"
     ]
 
-    credentials = (
-        ServiceAccountCredentials
-        .from_json_keyfile_name(
-            json_file,
-            scope
+    if service_account_json:
+        credentials = (
+            ServiceAccountCredentials
+            .from_json_keyfile_dict(
+                json.loads(service_account_json),
+                scope
+            )
         )
-    )
+    else:
+        credentials = (
+            ServiceAccountCredentials
+            .from_json_keyfile_name(
+                json_file,
+                scope
+            )
+        )
 
     client = gspread.authorize(credentials)
 
