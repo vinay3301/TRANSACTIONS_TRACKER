@@ -16,6 +16,10 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      - name: Record workflow start time
+        id: workflow_start
+        run: echo "started_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
       - name: Check out repository
         uses: actions/checkout@v4
 
@@ -130,7 +134,105 @@ jobs:
           PY
 
       - name: Run transaction updater
+        id: run_updater
         env:
           SMS_BACKUP_DIR: ${{ github.workspace }}/sms_backup
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: python TranscationsUpdater.py
+- name: Send transaction email notification
+        if: always()
+        continue-on-error: true
+        env:
+          TRANSACTION_EMAIL_WEBHOOK_URL: ${{ secrets.TRANSACTION_EMAIL_WEBHOOK_URL }}
+          TRANSACTION_EMAIL_WEBHOOK_SECRET: ${{ secrets.TRANSACTION_EMAIL_WEBHOOK_SECRET }}
+          JOB_STATUS: ${{ job.status }}
+          UPDATER_OUTCOME: ${{ steps.run_updater.outcome }}
+          STARTED_AT: ${{ steps.workflow_start.outputs.started_at }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+
+          webhook_url = os.environ.get("TRANSACTION_EMAIL_WEBHOOK_URL")
+          webhook_secret = os.environ.get("TRANSACTION_EMAIL_WEBHOOK_SECRET")
+
+          if not webhook_url or not webhook_secret:
+              raise RuntimeError("Transaction email webhook secrets are missing.")
+
+          job_status = os.environ.get("JOB_STATUS", "").lower()
+          updater_outcome = os.environ.get("UPDATER_OUTCOME", "").lower()
+          conclusion = (
+              "success"
+              if job_status == "success" and updater_outcome == "success"
+              else "failure"
+          )
+
+          report = {}
+          report_path = Path("transaction_email_report.json")
+
+          if conclusion == "success" and report_path.is_file():
+              report = json.loads(report_path.read_text(encoding="utf-8"))
+
+          now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+          run_id = int(os.environ["RUN_ID"])
+          run_number = int(os.environ["RUN_NUMBER"])
+          run_attempt = int(os.environ["RUN_ATTEMPT"])
+          repository = os.environ["REPOSITORY"]
+          server_url = os.environ["SERVER_URL"].rstrip("/")
+
+          payload = {
+              "secret": webhook_secret,
+              "workflow_run": {
+                  "id": run_id,
+                  "run_number": run_number,
+                  "run_attempt": run_attempt,
+                  "name": os.environ["WORKFLOW_NAME"],
+                  "event": os.environ["EVENT_NAME"],
+                  "conclusion": conclusion,
+                  "run_started_at": os.environ.get("STARTED_AT") or now,
+                  "created_at": os.environ.get("STARTED_AT") or now,
+                  "updated_at": now,
+                  "html_url": f"{server_url}/{repository}/actions/runs/{run_id}"
+              },
+              "report": report
+          }
+
+          request = Request(
+              webhook_url,
+              data=json.dumps(payload).encode("utf-8"),
+              headers={"Content-Type": "application/json"},
+              method="POST"
+          )
+
+          try:
+              with urlopen(request, timeout=30) as response:
+                  response_text = response.read().decode("utf-8")
+          except HTTPError as error:
+              response_text = error.read().decode("utf-8", errors="replace")
+              raise RuntimeError(
+                  f"Email webhook returned HTTP {error.code}: {response_text}"
+              )
+
+          result = json.loads(response_text)
+          if not result.get("ok"):
+              raise RuntimeError(
+                  "Email webhook rejected notification: "
+                  + str(result.get("error", "unknown error"))
+              )
+
+          print(
+              f"Email notification accepted for workflow run {run_id} "
+              f"(conclusion: {conclusion})."
+          )
+          PY
