@@ -137,10 +137,11 @@ CONTACT_MAP = {
         "CHILAKA VENKAIAH",
     ],
 
-    "HOUSEHOLD EXPENSES STORE @5TH LINE": [
+    "HOUSEHOLD EXPENSES": [
         "SATYAM UPPU",
         "SRI VANI MATCHING CENTRE",
         "SRI SURYA SAREES",
+        "KIRANA",
     ],
 
     "TRUPTI FOOD COURT": [
