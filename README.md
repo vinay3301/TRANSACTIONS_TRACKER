@@ -20,6 +20,7 @@ The email notification step is configured not to fail the transaction-processing
 - `TranscationsUpdater.py` — transaction parsing, deduplication, Google Sheets updates, and email-report data generation.
 - `.github/workflows/transaction_update.yml` — manually dispatched GitHub Actions workflow used by the Termux scheduler.
 - `requirements.txt` — Python dependencies.
+- `tests/test_contact_mapping.py` — SMS counterparty extraction and contact-mapping regression tests.
 - `README.md` — setup and operations documentation.
 
 ## Required services and configuration
@@ -89,3 +90,16 @@ The cron daemon must be running for scheduled dispatches to occur. Android batte
 - Preserve the existing `GOOGLE_SERVICE_ACCOUNT_JSON` secret when changing other secrets.
 - The updater filename is currently spelled `TranscationsUpdater.py`; the workflow references this exact filename.
 - Review GitHub Actions logs before changing code after a failed run.
+
+
+## Contact mapping and parser tests
+
+The updater extracts a counterparty from common bank SMS fields before applying CONTACT_MAP. It supports multiline and single-line To, To|Info, and Info fields, with VPA and UPI User as fallbacks when no explicit beneficiary field is present. Known merchant spellings can be added as aliases under the existing canonical name; unknown counterparties remain visible instead of being replaced with a generic label.
+
+Run the parser and contact-mapping regression tests locally after installing requirements.txt:
+
+```sh
+python -m unittest discover -s tests -v
+```
+
+The GitHub Actions workflow runs the same tests before downloading the SMS backup or making any Google Sheets changes.
