@@ -33,16 +33,16 @@ class ContactMappingRegressionTests(unittest.TestCase):
 
     def test_vpa_fallback_is_used_for_debit(self):
         body = "UPI payment debited Rs.100 VPA *0866@ybl Ref 123456"
-        self.assertEqual(extract_purpose(body, bank="HDFC"), "MOM or MAA")
+        self.assertEqual(extract_purpose(body, bank="HDFC"), "MOM OR MAA")
 
     def test_upi_user_credit_maps_known_contact(self):
         body = "UPI User *0866@ybl credited with Rs.500 Ref No 123456"
-        self.assertEqual(extract_purpose(body, bank="BOB"), "MOM or MAA")
+        self.assertEqual(extract_purpose(body, bank="BOB"), "MOM OR MAA")
 
     def test_existing_mom_alias_variants_remain_mapped(self):
-        self.assertEqual(map_contact_name("*0866@ybl"), "MOM or MAA")
-        self.assertEqual(map_contact_name("0866@axl"), "MOM or MAA")
-        self.assertEqual(map_contact_name("7981540866"), "MOM or MAA")
+        self.assertEqual(map_contact_name("*0866@ybl"), "MOM OR MAA")
+        self.assertEqual(map_contact_name("0866@axl"), "MOM OR MAA")
+        self.assertEqual(map_contact_name("7981540866"), "MOM OR MAA")
 
     def test_sent_sms_is_classified_as_debit(self):
         self.assertTrue(is_debit_transaction(THRUPTHI_SMS))
