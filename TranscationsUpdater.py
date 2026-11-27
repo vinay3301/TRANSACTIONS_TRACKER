@@ -458,6 +458,24 @@ def extract_counterparty(body: str) -> str:
     return ""
 
 
+def is_debit_transaction(body: str) -> bool:
+    """Return whether an SMS describes money leaving the account."""
+    body_low = (body or "").lower()
+    return any(
+        word in body_low
+        for word in (
+            "debited",
+            "sent",
+            "spent",
+            "withdrawn",
+            "withdrawal",
+            "dr.",
+            "dr from",
+            "transferred from"
+        )
+    )
+
+
 def extract_purpose(body: str, bank: str = None) -> str:
 
     body_clean = " ".join(body.split())
@@ -1134,19 +1152,8 @@ def run_transaction_update():
 
                 body_low = body.lower()
 
-                # NEW: Withdrawal is treated as a debit.
-                is_debit = any(
-                    word in body_low
-                    for word in (
-                        "debited",
-                        "spent",
-                        "withdrawn",
-                        "withdrawal",
-                        "dr.",
-                        "dr from",
-                        "transferred from"
-                    )
-                )
+                # Explicit "Sent" SMS notifications are also debits.
+                is_debit = is_debit_transaction(body)
 
                 is_credit = (
                     not is_debit

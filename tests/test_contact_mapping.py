@@ -4,6 +4,7 @@ from TranscationsUpdater import (
     extract_amount,
     extract_counterparty,
     extract_purpose,
+    is_debit_transaction,
     map_contact_name,
 )
 
@@ -42,6 +43,10 @@ class ContactMappingRegressionTests(unittest.TestCase):
         self.assertEqual(map_contact_name("*0866@ybl"), "MOM or MAA")
         self.assertEqual(map_contact_name("0866@axl"), "MOM or MAA")
         self.assertEqual(map_contact_name("7981540866"), "MOM or MAA")
+
+    def test_sent_sms_is_classified_as_debit(self):
+        self.assertTrue(is_debit_transaction(THRUPTHI_SMS))
+        self.assertFalse(is_debit_transaction("Rs.500 credited to your account"))
 
     def test_unknown_counterparty_is_preserved(self):
         self.assertEqual(extract_purpose("Sent Rs.25 To UNKNOWN MERCHANT On 27/11/26 Ref 123"), "UNKNOWN MERCHANT")
