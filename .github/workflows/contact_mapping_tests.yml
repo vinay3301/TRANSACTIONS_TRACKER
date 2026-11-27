@@ -26,4 +26,6 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run contact mapping regression tests
+        env:
+          SMS_BACKUP_DIR: ${{ runner.temp }}/sms_backup_tests
         run: python -m unittest discover -s tests -v
