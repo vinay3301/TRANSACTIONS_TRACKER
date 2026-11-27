@@ -146,6 +146,7 @@ CONTACT_MAP = {
 
     "TRUPTI FOOD COURT": [
         "MANYAM RAMU",
+        "THRUPTHI FOOD COURT",
     ],
 
     "FUEL": [
@@ -394,6 +395,87 @@ def extract_amount(body: str) -> float:
     )
 
 
+def extract_counterparty(body: str) -> str:
+    """Extract To/Info, VPA, or UPI User counterparty fields from bank SMS."""
+    if not body:
+        return ""
+
+    lines = [line.strip() for line in str(body).splitlines() if line.strip()]
+
+    def clean_candidate(value: str) -> str:
+        value = value.strip(" \t\r\n.,:;|")
+        value = re.split(
+            r"\s+(?:On\s+\d{1,2}/\d{1,2}/\d{2,4}|"
+            r"Ref(?:erence)?(?:\s*No)?\s*[:#]?|"
+            r"UPI\s+RRN\s*[:#]?|AvlBal\b|AvlB\b)",
+            value, maxsplit=1, flags=re.IGNORECASE
+        )[0]
+        return value.strip(" \t\r\n.,:;|")
+
+    # Prefer explicit beneficiary/merchant fields, including multiline SMS.
+    for line in lines:
+        match = re.match(
+            r"^(?:To(?:\s*\|\s*Info)?|Info)\s*[:|]?\s*(.+?)\s*$",
+            line, re.IGNORECASE
+        )
+        if match:
+            candidate = clean_candidate(match.group(1))
+            if candidate:
+                return candidate.upper()
+
+    flattened = " ".join(str(body).split())
+    match = re.search(
+        r"(?:^|\s)(?:To(?:\s*\|\s*Info)?|Info)\s*[:|]?\s*(.+?)"
+        r"(?=\s+(?:On\b|Ref\b|Reference\b|AvlBal\b|AvlB\b)|$)",
+        flattened, re.IGNORECASE
+    )
+    if match:
+        candidate = clean_candidate(match.group(1))
+        if candidate:
+            return candidate.upper()
+
+    # VPA fallback for UPI messages without a To/Info field.
+    match = re.search(
+        r"\bVPA\s*[:=]?\s*(.+?)"
+        r"(?=\s+(?:Ref\b|Reference\b|UPI\s+RRN\b|On\b)|$)",
+        flattened, re.IGNORECASE
+    )
+    if match:
+        candidate = clean_candidate(match.group(1))
+        if candidate:
+            return candidate.upper()
+
+    # BOB sometimes identifies the counterparty as "UPI User <handle>".
+    match = re.search(
+        r"\bUPI\s+User\s*[:=]?\s*([^\s,;]+)",
+        str(body), re.IGNORECASE
+    )
+    if match:
+        candidate = clean_candidate(match.group(1))
+        if candidate:
+            return candidate.upper()
+
+    return ""
+
+
+def is_debit_transaction(body: str) -> bool:
+    """Return whether an SMS describes money leaving the account."""
+    body_low = (body or "").lower()
+    return any(
+        word in body_low
+        for word in (
+            "debited",
+            "sent",
+            "spent",
+            "withdrawn",
+            "withdrawal",
+            "dr.",
+            "dr from",
+            "transferred from"
+        )
+    )
+
+
 def extract_purpose(body: str, bank: str = None) -> str:
 
     body_clean = " ".join(body.split())
@@ -440,17 +522,22 @@ def extract_purpose(body: str, bank: str = None) -> str:
 
     elif "upi user" in body_low and "credited" in body_low:
 
-        ref_match = re.search(
-            r"Ref\s*No\s*(\d+)",
-            body_clean,
-            re.IGNORECASE
-        )
+        counterparty = extract_counterparty(body)
 
-        name = (
-            f"BOB UPI CREDIT ({ref_match.group(1)})"
-            if ref_match
-            else "BOB UPI CREDIT"
-        )
+        if counterparty:
+            name = counterparty
+        else:
+            ref_match = re.search(
+                r"Ref\s*No\s*(\d+)",
+                body_clean,
+                re.IGNORECASE
+            )
+
+            name = (
+                f"BOB UPI CREDIT ({ref_match.group(1)})"
+                if ref_match
+                else "BOB UPI CREDIT"
+            )
 
     elif "cr. to" in body_low and "dr. from" in body_low:
 
@@ -501,15 +588,11 @@ def extract_purpose(body: str, bank: str = None) -> str:
 
         else:
 
-            match = re.search(
-                r"(?:To|Info:)\s+(.*?)(?=\s+On|\s+\d{2}/\d{2}/\d{2}|\s+Ref|\.\s+Avl|$)",
-                body_clean,
-                re.IGNORECASE
-            )
+            counterparty = extract_counterparty(body)
 
-            if match:
+            if counterparty:
 
-                name = match.group(1).strip().upper()
+                name = counterparty.strip().upper()
 
                 name = re.sub(
                     r"^ACH\s+[D|C]-\s*",
@@ -526,14 +609,10 @@ def extract_purpose(body: str, bank: str = None) -> str:
 
     elif "vpa" in body_low:
 
-        match = re.search(
-            r"VPA\s+(.*?)(?:\s*\(UPI\s*(\d+)\)|\s*\(|$)",
-            body_clean,
-            re.IGNORECASE
-        )
+        counterparty = extract_counterparty(body)
 
-        if match:
-            name = match.group(1).strip().upper()
+        if counterparty:
+            name = counterparty
 
     elif "imps" in body_low and "-" in body_clean:
 
@@ -1073,19 +1152,8 @@ def run_transaction_update():
 
                 body_low = body.lower()
 
-                # NEW: Withdrawal is treated as a debit.
-                is_debit = any(
-                    word in body_low
-                    for word in (
-                        "debited",
-                        "spent",
-                        "withdrawn",
-                        "withdrawal",
-                        "dr.",
-                        "dr from",
-                        "transferred from"
-                    )
-                )
+                # Explicit "Sent" SMS notifications are also debits.
+                is_debit = is_debit_transaction(body)
 
                 is_credit = (
                     not is_debit
